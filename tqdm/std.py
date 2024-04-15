@@ -12,7 +12,7 @@ from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from numbers import Number
-from time import time
+from time import time, sleep
 from warnings import warn
 from weakref import WeakSet
 
@@ -957,6 +957,7 @@ class tqdm(Comparable):
                  dynamic_ncols=False, smoothing=0.3, bar_format=None, initial=0,
                  position=None, postfix=None, unit_divisor=1000, write_bytes=False,
                  lock_args=None, nrows=None, colour=None, delay=0.0, gui=False,
+                 target_looptime=None,
                  **kwargs):
         """see tqdm.tqdm for arguments"""
         if file is None:
@@ -1045,6 +1046,9 @@ class tqdm(Comparable):
         if smoothing is None:
             smoothing = 0
 
+        if target_looptime is None:
+            target_looptime = 0
+
         # Store the arguments
         self.iterable = iterable
         self.desc = desc or ''
@@ -1075,6 +1079,9 @@ class tqdm(Comparable):
         self.postfix = None
         self.colour = colour
         self._time = time
+        self._sleep = sleep
+        self.target_looptime = target_looptime
+        self.sleep_per_iter = target_looptime / 2 # there is no good prior
         if postfix:
             try:
                 self.set_postfix(refresh=False, **postfix)
@@ -1179,6 +1186,8 @@ class tqdm(Comparable):
 
         try:
             for obj in iterable:
+                if self.sleep_per_iter > 0:
+                    sleep(self.sleep_per_iter)
                 yield obj
                 # Update and possibly print the progressbar.
                 # Note: does not call self.update(1) for speed optimisation.
@@ -1235,6 +1244,15 @@ class tqdm(Comparable):
             if dt >= self.mininterval and cur_t >= self.start_t + self.delay:
                 cur_t = self._time()
                 dn = self.n - self.last_print_n  # >= n
+                if self.target_looptime > 0 and dn > 0:
+                    # Incrementally update the time to sleep during update()
+                    # using the error measured between refresh calls.
+                    # Has some steady-state offset if looptime drifts quickly
+                    target_dt = self.target_looptime*dn
+                    dt_error = target_dt - dt
+                    self.sleep_per_iter += dt_error / dn
+                    if self.sleep_per_iter < 0:
+                        self.sleep_per_iter = 0 # avoid wind-up
                 if self.smoothing and dt and dn:
                     # EMA (not just overall average)
                     self._ema_dn(dn)
