@@ -1081,7 +1081,8 @@ class tqdm(Comparable):
         self._time = time
         self._sleep = sleep
         self.target_looptime = target_looptime
-        self.sleep_per_iter = target_looptime / 2 # there is no good prior
+        # this prior limits the error to +-50% if target_looptime is possible:
+        self.sleep_per_iter = 0.5*target_looptime
         if postfix:
             try:
                 self.set_postfix(refresh=False, **postfix)
@@ -1244,11 +1245,14 @@ class tqdm(Comparable):
             if dt >= self.mininterval and cur_t >= self.start_t + self.delay:
                 cur_t = self._time()
                 dn = self.n - self.last_print_n  # >= n
-                if self.target_looptime > 0 and dn > 0:
+                if self.target_looptime > 0 and dn > 0 \
+                        and self.last_print_n > 0:
                     # Incrementally update the time to sleep during update()
                     # using the error measured between refresh calls.
                     # Has some steady-state offset if looptime drifts quickly
-                    target_dt = self.target_looptime*dn
+                    # First loop call often takes (much) longer, so we also
+                    # check self.last_print_n > 0
+                    target_dt = self.target_looptime * dn
                     dt_error = target_dt - dt
                     self.sleep_per_iter += dt_error / dn
                     if self.sleep_per_iter < 0:
